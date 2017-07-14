@@ -1,12 +1,12 @@
-function runbenchmark(file::AbstractString, output::AbstractString, tunefile::AbstractString; retune=false, custom_loadpath = nothing)
-    benchmark_proc(file, output, tunefile, retune=retune, custom_loadpath=custom_loadpath)
+function runbenchmark(file::AbstractString, output::AbstractString, tunefile::AbstractString,
+                      benchmarkconfig::BenchmarkConfig; retune=false)
+    benchmark_proc(file, output, tunefile, benchmarkconfig, retune=retune)
     readresults(output)
 end
 
-function benchmark_proc(file, output, tunefile; retune=false, custom_loadpath="")
+function benchmark_proc(file, output, tunefile, benchmarkconfig; retune=false, custom_loadpath="")
     color = Base.have_color? "--color=yes" : "--color=no"
     compilecache = "--compilecache=" * (Bool(Base.JLOptions().use_compilecache) ? "yes" : "no")
-    julia_exe = Base.julia_cmd()
     _file, _output, _tunefile, _custom_loadpath = map(escape_string, (file, output, tunefile, custom_loadpath))
     codecov_option = Base.JLOptions().code_coverage
     coverage = if codecov_option == 0
@@ -22,7 +22,11 @@ function benchmark_proc(file, output, tunefile; retune=false, custom_loadpath=""
         using PkgBenchmark
         PkgBenchmark.runbenchmark_local("$_file", "$_output", "$_tunefile", $retune )
         """
-    run(`$julia_exe $color --code-coverage=$coverage $compilecache -e $exec_str`)
+
+    target_env = [k => v for (k, v) in benchmarkconfig.env]
+    withenv(target_env...) do
+        run(`$(benchmarkconfig.juliacmd) --code-coverage=$coverage $color $compilecache -e $exec_str`)
+    end
 end
 
 function runbenchmark_local(file, output, tunefile, retune)
@@ -115,11 +119,11 @@ function benchmarkpkg(pkg, ref=nothing;
 
     function do_benchmark()
         !isfile(script) && error("Benchmark script $script not found")
-
+        ref = BenchmarkConfig(ref)
         res = with_reqs(require, ()->info("Resolving dependencies for benchmark")) do
             withtemp(tempname()) do f
                 info("Running benchmarks...")
-                runbenchmark(script, f, tunefile; retune=retune, custom_loadpath = custom_loadpath)
+                runbenchmark(script, f, tunefile, ref; retune=retune, custom_loadpath = custom_loadpath)
             end
         end
 
@@ -140,7 +144,7 @@ function benchmarkpkg(pkg, ref=nothing;
                 end
                 if tosave
                     !isdir(resultsdir) && mkpath(resultsdir)
-                    resfile = joinpath(resultsdir, sha*".jld")
+                    resfile = joinpath(resultsdir, string(_hash(ref, sha), ".jld"))
                     if !isfile(resfile) || overwrite == true
                         writeresults(resfile, res)
                         info("Results of the benchmark were written to $resfile")
@@ -156,7 +160,7 @@ function benchmarkpkg(pkg, ref=nothing;
         res
     end
 
-    if ref !== nothing
+    if ref.id !== nothing
         if LibGit2.with(LibGit2.isdirty, LibGit2.GitRepo(Pkg.dir(pkg)))
             error("$(Pkg.dir(pkg)) is dirty. Please commit/stash your " *
                   "changes before benchmarking a specific commit")

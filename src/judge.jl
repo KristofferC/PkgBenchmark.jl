@@ -1,7 +1,7 @@
 function _cached(pkg, ref; resultsdir=defaultresultsdir(pkg), kws...)
     if ref !== nothing
         sha = shastring(Pkg.dir(pkg), ref)
-        file = joinpath(resultsdir, sha*".jld")
+        file = joinpath(resultsdir, string(_hash(ref, sha), ".jld"))
         if isfile(file)
             info("Reading results for $(sha[1:6]) from $resultsdir")
             return readresults(file)
@@ -15,7 +15,7 @@ _repeat(x, n) = !isa(n, AbstractArray) && [x for _ in 1:n]
 _repeat(x::AbstractArray, n) = x
 
 function withresults(f::Function, pkg::String, refs;
-                                    use_saved=trues(length(refs)), kwargs...)
+                     use_saved=trues(length(refs)), kwargs...)
 
     use_saved = _repeat(use_saved, length(refs))
     [s ? _cached(pkg, r; kwargs...) : benchmarkpkg(pkg, r; kwargs...)
