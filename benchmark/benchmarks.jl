@@ -1,6 +1,12 @@
 using PkgBenchmark
 using UnicodePlots
 
+
+@benchgroup "lala" begin
+    @bench "plus" 1 + 1
+end
+
+#=
 @benchgroup "utf8" ["string", "unicode"] begin
     teststr = String(join(rand(MersenneTwister(1), 'a':'d', 10^4)))
     @bench "replace" replace($teststr, "a", "b")
@@ -29,3 +35,5 @@ end
         end
     end
 end
+
+=#

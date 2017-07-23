@@ -1,59 +1,7 @@
-function runbenchmark(file::AbstractString, output::AbstractString, tunefile::AbstractString,
-                      benchmarkconfig::BenchmarkConfig; retune=false)
-    benchmark_proc(file, output, tunefile, benchmarkconfig, retune=retune)
-    readresults(output)
-end
-
-function benchmark_proc(file, output, tunefile, benchmarkconfig; retune=false, custom_loadpath="")
-    color = Base.have_color? "--color=yes" : "--color=no"
-    compilecache = "--compilecache=" * (Bool(Base.JLOptions().use_compilecache) ? "yes" : "no")
-    _file, _output, _tunefile, _custom_loadpath = map(escape_string, (file, output, tunefile, custom_loadpath))
-    codecov_option = Base.JLOptions().code_coverage
-    coverage = if codecov_option == 0
-        "none"
-    elseif codecov_option == 1
-        "user"
-    else
-        "all"
-    end
-    exec_str = isempty(_custom_loadpath) ? "" : "push!(LOAD_PATH, \"$(_custom_loadpath)\")\n"
-    exec_str *=
-        """
-        using PkgBenchmark
-        PkgBenchmark.runbenchmark_local("$_file", "$_output", "$_tunefile", $retune )
-        """
-
-    target_env = [k => v for (k, v) in benchmarkconfig.env]
-    withenv(target_env...) do
-        run(`$(benchmarkconfig.juliacmd) --code-coverage=$coverage $color $compilecache -e $exec_str`)
-    end
-end
-
-function runbenchmark_local(file, output, tunefile, retune)
-    _reset_stack()
-    _reset_suite()
-
-    include(file)
-
-    suite = if _get_suite() != nothing
-        _get_suite()
-    else
-        _root_group()
-    end
-    cached_tune(tunefile, suite, retune)
-    results = run(suite)
-    writeresults(output, results)
-    results
-end
-
-function withtemp(f, file)
-    try f(file)
-    catch err
-        rethrow()
-    finally rm(file) end
-end
-
 # Package benchmarking API
+
+shastring(r::LibGit2.GitRepo, refname) = string(LibGit2.revparseid(r, refname))
+shastring(dir::AbstractString, refname) = LibGit2.with(r -> shastring(r, refname), LibGit2.GitRepo(dir))
 
 defaultscript(pkg) =
     Pkg.dir(pkg, "benchmark", "benchmarks.jl")
@@ -83,7 +31,11 @@ defaulttunefile(pkg) =
 
 * `script` is the script with the benchmarks. Defaults to `PKG/benchmark/benchmarks.jl`
 * `require` is the REQUIRE file containing dependencies needed for the benchmark. Defaults to `PKG/benchmark/REQUIRE`.
-* `resultsdir` the directory where to file away results. Defaults to `PKG/benchmark/.results`. Provided the repository is not dirty, results generated will be saved in this directory in a file named `<SHA1_of_commit>.jld`. And can be used later by functions such as `judge`. If you choose to, you can save the results manually using `writeresults(file, results)` where `results` is the return value of `benchmarkpkg` function. It can be read back with `readresults(file)`.
+* `resultsdir` the directory where to file away results. Defaults to `PKG/benchmark/.results`.
+   Provided the repository is not dirty, results generated will be saved in this directory in a file named `<SHA1_of_commit>.jld`.
+   And can be used later by functions such as `judge`. If you choose to, you can save the results manually using
+   `writeresults(file, results)` where `results` is the return value of `benchmarkpkg` function.
+   It can be read back with `readresults(file)`.
 * `saveresults` if set to false, results will not be saved in `resultsdir`.
 * `tunefile` file to use for tuning benchmarks, will be created if doesn't exist. Defaults to `PKG/benchmark/.tune.jld`
 * `retune` force a re-tune, saving results to the tune file
@@ -104,7 +56,7 @@ benchmarkpkg("MyPkg", "my-feature"; script="/home/me/mycustombenchmark.jl", resu
   # note: its a good idea to set a new resultsdir with a new benchmark script. `PKG/benchmark/.results` is meant for `PKG/benchmark/benchmarks.jl` script.
 ```
 """
-function benchmarkpkg(pkg, ref=nothing;
+function benchmarkpkg(pkg, ref=BenchmarkConfig();
                       script=defaultscript(pkg),
                       require=defaultrequire(pkg),
                       resultsdir=defaultresultsdir(pkg),
@@ -116,22 +68,20 @@ function benchmarkpkg(pkg, ref=nothing;
                       promptsave=nothing  #= deprecated =#)
 
     promptsave != nothing && Base.warn_once("the `promptsave` keyword is deprecated and will be removed.")
+    dirty = LibGit2.with(LibGit2.isdirty, LibGit2.GitRepo(Pkg.dir(pkg)))
 
     function do_benchmark()
         !isfile(script) && error("Benchmark script $script not found")
         ref = BenchmarkConfig(ref)
-        res = with_reqs(require, ()->info("Resolving dependencies for benchmark")) do
-            withtemp(tempname()) do f
-                info("Running benchmarks...")
-                runbenchmark(script, f, tunefile, ref; retune=retune, custom_loadpath = custom_loadpath)
-            end
+        local_runner_save_path = tempname()
+        res = with_reqs(require, () -> info("Resolving dependencies for benchmark")) do
+            info("Running benchmarks...")
+            runbenchmark(script, local_runner_save_path, local_runner_save_path, tunefile, ref; retune=retune, custom_loadpath = custom_loadpath)
         end
-
-        dirty = LibGit2.with(LibGit2.isdirty, LibGit2.GitRepo(Pkg.dir(pkg)))
-        sha = shastring(Pkg.dir(pkg), "HEAD")
 
         if !dirty
             if saveresults
+                sha = shastring(Pkg.dir(pkg), "HEAD")
                 tosave = true
                 if promptsave == true
                     print("File results of this run? (commit=$(sha[1:6]), resultsdir=$resultsdir) (Y/n) ")
@@ -146,7 +96,9 @@ function benchmarkpkg(pkg, ref=nothing;
                     !isdir(resultsdir) && mkpath(resultsdir)
                     resfile = joinpath(resultsdir, string(_hash(ref, sha), ".jld"))
                     if !isfile(resfile) || overwrite == true
-                        writeresults(resfile, res)
+                        println("Writing 1...")
+                        # move the result
+                        mv(local_runner_save_path, joinpath(resultsdir, resfile); remove_destination = true)
                         info("Results of the benchmark were written to $resfile")
                     else
                         info("Found existing results, no output written")
@@ -161,12 +113,11 @@ function benchmarkpkg(pkg, ref=nothing;
     end
 
     if ref.id !== nothing
-        if LibGit2.with(LibGit2.isdirty, LibGit2.GitRepo(Pkg.dir(pkg)))
+        if dirty
             error("$(Pkg.dir(pkg)) is dirty. Please commit/stash your " *
                   "changes before benchmarking a specific commit")
         end
-
-        return withcommit(do_benchmark, LibGit2.GitRepo(Pkg.dir(pkg)), ref)
+        return withcommit(do_benchmark, LibGit2.GitRepo(Pkg.dir(pkg)), ref.id)
     else
         # benchmark on the current state of the repo
         do_benchmark()
@@ -174,45 +125,75 @@ function benchmarkpkg(pkg, ref=nothing;
 
 end
 
-function withcommit(f, repo, commit)
-    LibGit2.transact(repo) do r
-        branch = try LibGit2.branch(r) catch err; nothing end
-        prev = shastring(r, "HEAD")
-        try
-            LibGit2.checkout!(r, shastring(r,commit))
-            f()
-        catch err
-            rethrow(err)
-        finally
-            if branch !== nothing
-                LibGit2.branch!(r, branch)
-            end
-        end
+function runbenchmark(benchmarkfile::String, save_path::String, output::String, tunefile::String, 
+                      benchmarkconfig::BenchmarkConfig; retune::Bool=false, custom_loadpath::String="")    
+    tmp = tempname()
+    println("Saving to $tmp")
+    save(File(format"JLD", tmp), "config", benchmarkconfig)
+
+    _benchmarkfile, _output, _tunefile, _custom_loadpath, _tmp, _save_path = map(escape_string, (benchmarkfile, output, tunefile, custom_loadpath, tmp, save_path))
+    codecov_option = Base.JLOptions().code_coverage
+    coverage = if codecov_option == 0
+        "none"
+    elseif codecov_option == 1
+        "user"
+    else
+        "all"
     end
+    color = Base.have_color ? "--color=yes" : "--color=no"
+    compilecache = "--compilecache=" * (Bool(Base.JLOptions().use_compilecache) ? "yes" : "no")
+
+    exec_str = isempty(_custom_loadpath) ? "" : "push!(LOAD_PATH, \"$(_custom_loadpath)\")\n"
+    exec_str *=
+        """
+        using PkgBenchmark
+        PkgBenchmark.runbenchmark_local("$_benchmarkfile", "$_output", "$_tunefile", "$_tmp", "$_save_path", $retune)
+        """
+
+    target_env = [k => v for (k, v) in benchmarkconfig.env]
+    withenv(target_env...) do
+        run(`$(benchmarkconfig.juliacmd) --code-coverage=$coverage $color $compilecache -e $exec_str`)
+    end
+    readresults(output)
 end
 
-shastring(r::LibGit2.GitRepo, refname) = string(LibGit2.revparseid(r, refname))
-shastring(dir::AbstractString, refname) = LibGit2.with(r->shastring(r, refname), LibGit2.GitRepo(dir))
+function runbenchmark_local(benchmarkfile, output, tunefile, configfile, save_path, retune)
+    # Define benchmarks
+    _reset_stack()
+    _reset_suite()
+    include(benchmarkfile)
+    suite = if _get_suite() != nothing # Check if using Dict based API
+        _get_suite()
+    else
+        _root_group()
+    end
 
-function writeresults(file, res)
-    save(File(format"JLD", file), "time", time(), "trials", res)
+    # Tuning
+    if isfile(tunefile) && !retune
+        println("Using benchmark tuning data in $tunefile")
+        loadparams!(suite, JLD.load(tunefile, "suite"), :evals, :samples)
+    else
+        println("Creating benchmark tuning file $tunefile")
+        mkpath(dirname(tunefile))
+        tune!(suite)
+        JLD.save(tunefile, "suite", params(suite))
+    end
+
+    # Running
+    results = run(suite)
+
+    # Write results
+    benchmark_config = load(File(format"JLD", configfile))["config"]
+    println("Writing 2...")
+    vinfo = first(split(readstring(`julia -e 'versioninfo(true)'`), "Environment"))
+    results = BenchmarkResult(benchmark_config, results, now(), vinfo)
+    save(File(format"JLD", save_path), "results", results)
+    println("Wrote it..")
+    return nothing
 end
 
 function readresults(file)
-    JLD.jldopen(file,"r") do f
-        read(f, "trials")
+    JLD.jldopen(file, "r") do f
+        read(f, "results")
     end
-end
-
-function cached_tune(tune_file, suite, force)
-    if isfile(tune_file) && !force
-       println("Using benchmark tuning data in $tune_file")
-       loadparams!(suite, JLD.load(tune_file, "suite"), :evals, :samples)
-    else
-       println("Creating benchmark tuning file $tune_file")
-       mkpath(dirname(tune_file))
-       tune!(suite)
-       JLD.save(tune_file, "suite", params(suite))
-    end
-    suite
 end

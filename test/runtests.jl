@@ -51,6 +51,7 @@ const TEST_PACKAGE_NAME = "Example"
 tmp_dir = joinpath(tempdir(), randstring())
 old_pkgdir = Pkg.dir()
 
+#=
 temp_pkg_dir(;tmp_dir = tmp_dir) do
     test_sig = LibGit2.Signature("TEST", "TEST@TEST.COM", round(time(), 0), 0)
     Pkg.add(TEST_PACKAGE_NAME)
@@ -125,3 +126,4 @@ temp_pkg_dir(;tmp_dir = tmp_dir) do
         end
     end
 end
+=#

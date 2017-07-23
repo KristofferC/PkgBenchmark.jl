@@ -1,37 +1,5 @@
-function _cached(pkg, ref; resultsdir=defaultresultsdir(pkg), kws...)
-    if ref !== nothing
-        sha = shastring(Pkg.dir(pkg), ref)
-        file = joinpath(resultsdir, string(_hash(ref, sha), ".jld"))
-        if isfile(file)
-            info("Reading results for $(sha[1:6]) from $resultsdir")
-            return readresults(file)
-        end
-    end
-
-    benchmarkpkg(pkg, ref;resultsdir=resultsdir, kws...)
-end
-
-_repeat(x, n) = !isa(n, AbstractArray) && [x for _ in 1:n]
-_repeat(x::AbstractArray, n) = x
-
-function withresults(f::Function, pkg::String, refs;
-                     use_saved=trues(length(refs)), kwargs...)
-
-    use_saved = _repeat(use_saved, length(refs))
-    [s ? _cached(pkg, r; kwargs...) : benchmarkpkg(pkg, r; kwargs...)
-        for (r,s) in zip(refs, use_saved)] |> f
-end
-
 """
-    judge(pkg, [ref], baseline;
-        f=(minimum, minimum),
-        usesaved=(true, true),
-        script=defaultscript(pkg),
-        require=defaultrequire(pkg),
-        resultsdir=defaultresultsdir(pkg),
-        saveresults=true,
-        promptsave=true,
-        promptoverwrite=true)
+    judge(pkg, ref, baseline; kwargs...)
 
 You can call `showall(results)` to see a comparison of all the benchmarks.
 
@@ -41,17 +9,31 @@ You can call `showall(results)` to see a comparison of all the benchmarks.
 - `ref` optional, the commit to judge. If skipped, use the current state of the package repo.
 - `baseline` is the commit to compare `ref` against.
 
-**Keyword arguments**:
-
-- `f` - tuple of estimator functions - one each for `from_ref`, `to_ref` respectively
-- `use_saved` - similar tuple of flags, if false will not use saved results
-- for description of other keyword arguments, see `benchmarkpkg`
+Keyword arguments are passed to [`benchmarkpkg`](@ref)
 """
-function BenchmarkTools.judge(pkg::String, ref1::Union{String,Void}, ref2::String; f=minimum, judgekwargs=Dict(), kwargs...)
-    fs = _repeat(f, 2)
-    withresults(rs->judge(map((f,x)->f(x), fs, rs)...; judgekwargs...), pkg, (ref1, ref2); kwargs...)
-end
+function BenchmarkTools.judge(pkg::String, ref1 = BenchmarkConfig(), ref2 = BenchmarkConfig(); 
+                              f=nothing, used_saved=true, resultsdir = defaultresultsdir(pkg), kwargs...)
+    ref1, ref2 = BenchmarkConfig(ref1), BenchmarkConfig(ref2)
+    if f != nothing
+        Base.warn_once("key word `f` is deprecated and will be removed")
+    else
+        f = minimum
+    end
 
-function BenchmarkTools.judge(pkg::String, ref2::String; kwargs...)
-    judge(pkg, nothing, ref2; kwargs...)
+    function cached(ref; kws...)
+        if ref.id !== nothing
+            sha = shastring(Pkg.dir(pkg), ref.id)
+            file = joinpath(resultsdir, string(_hash(ref, sha), ".jld"))
+            if isfile(file)
+                info("Loading stored results for $(sha[1:6]) from $resultsdir")
+                return readresults(file)
+            end
+        end
+        return benchmarkpkg(pkg, ref; kws...)
+    end
+
+    result_ref1 = cached(ref1; kwargs...)
+    result_ref2 = cached(ref2; kwargs...)
+
+    return result_ref1, result_ref2
 end
