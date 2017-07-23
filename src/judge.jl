@@ -1,7 +1,8 @@
 """
-    judge(pkg, ref, baseline; kwargs...)
+    judge(pkg::String, target::BenchmarkConfig, baseline::BenchmarkConfig; judge_kwargs::Dict, kwargs...)
 
-You can call `showall(results)` to see a comparison of all the benchmarks.
+Judges the results of the benchmarktarget `target` against `baseline`.
+
 
 **Arguments**:
 
@@ -12,7 +13,7 @@ You can call `showall(results)` to see a comparison of all the benchmarks.
 Keyword arguments are passed to [`benchmarkpkg`](@ref)
 """
 function BenchmarkTools.judge(pkg::String, ref1 = BenchmarkConfig(), ref2 = BenchmarkConfig(); 
-                              f=nothing, used_saved=true, resultsdir = defaultresultsdir(pkg), kwargs...)
+                              f=nothing, used_saved=true, resultsdir = defaultresultsdir(pkg), judge_kwargs = Dict(), kwargs...)
     ref1, ref2 = BenchmarkConfig(ref1), BenchmarkConfig(ref2)
     if f != nothing
         Base.warn_once("key word `f` is deprecated and will be removed")
@@ -34,6 +35,8 @@ function BenchmarkTools.judge(pkg::String, ref1 = BenchmarkConfig(), ref2 = Benc
 
     result_ref1 = cached(ref1; kwargs...)
     result_ref2 = cached(ref2; kwargs...)
+
+    BenchmarkTools.judge(f(result_ref1, result_ref2); judge_kwargs...)
 
     return result_ref1, result_ref2
 end

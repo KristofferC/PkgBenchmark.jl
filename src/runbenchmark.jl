@@ -117,7 +117,7 @@ function benchmarkpkg(pkg, ref=BenchmarkConfig();
             error("$(Pkg.dir(pkg)) is dirty. Please commit/stash your " *
                   "changes before benchmarking a specific commit")
         end
-        return withcommit(do_benchmark, LibGit2.GitRepo(Pkg.dir(pkg)), ref.id)
+        return with_commit(do_benchmark, LibGit2.GitRepo(Pkg.dir(pkg)), ref.id)
     else
         # benchmark on the current state of the repo
         do_benchmark()
@@ -186,7 +186,7 @@ function runbenchmark_local(benchmarkfile, output, tunefile, configfile, save_pa
     benchmark_config = load(File(format"JLD", configfile))["config"]
     println("Writing 2...")
     vinfo = first(split(readstring(`julia -e 'versioninfo(true)'`), "Environment"))
-    results = BenchmarkResult(benchmark_config, results, now(), vinfo)
+    results = BenchmarkResult(benchmark_config, minimum(results), now(), vinfo)
     save(File(format"JLD", save_path), "results", results)
     println("Wrote it..")
     return nothing
