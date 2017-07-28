@@ -6,18 +6,17 @@ function temp_pkg_dir(fn::Function; tmp_dir=joinpath(tempdir(), randstring()),
         remove_tmp_dir::Bool=true, initialize::Bool=true)
     # Used in tests below to set up and tear down a sandboxed package directory
     withenv("JULIA_PKGDIR" => tmp_dir) do
-        @test !isdir(Pkg.dir())
+       # @test !isdir(Pkg.dir())
         try
             if initialize
                 Pkg.init()
-                @test isdir(Pkg.dir())
                 Pkg.resolve()
             else
                 mkpath(Pkg.dir())
             end
             fn()
         finally
-            remove_tmp_dir && rm(tmp_dir, recursive=true)
+            # remove_tmp_dir && rm(tmp_dir, recursive=true)
         end
     end
 end
@@ -49,9 +48,10 @@ const TEST_PACKAGE_NAME = "Example"
 
 # Set up a test package in a temp folder that we use to test things on
 tmp_dir = joinpath(tempdir(), randstring())
+#tmp_dir = "/tmp/fsdf"
 old_pkgdir = Pkg.dir()
 
-#=
+
 temp_pkg_dir(;tmp_dir = tmp_dir) do
     test_sig = LibGit2.Signature("TEST", "TEST@TEST.COM", round(time(), 0), 0)
     Pkg.add(TEST_PACKAGE_NAME)
@@ -78,12 +78,12 @@ temp_pkg_dir(;tmp_dir = tmp_dir) do
         # Test we are on a branch and run benchmark on a commit that we end up back on the branch
         LibGit2.branch!(repo, "PR")
         LibGit2.branch!(repo, "master")
-        PkgBenchmark.benchmarkpkg(TEST_PACKAGE_NAME, "PR"; custom_loadpath=old_pkgdir)
+        PkgBenchmark.benchmark(TEST_PACKAGE_NAME, "PR"; custom_loadpath=old_pkgdir, saveresults=false)
         @test LibGit2.branch(repo) == "master"
 
         # Test we are on a commit and run benchmark on another commit and end up on the commit
         LibGit2.checkout!(repo, string(commit_master))
-        PkgBenchmark.benchmarkpkg(TEST_PACKAGE_NAME, "PR"; custom_loadpath=old_pkgdir)
+        PkgBenchmark.benchmark(TEST_PACKAGE_NAME, "PR"; custom_loadpath=old_pkgdir, saveresults=false)
         @test LibGit2.revparseid(repo, "HEAD") == commit_master
     end
 
@@ -97,25 +97,25 @@ temp_pkg_dir(;tmp_dir = tmp_dir) do
     LibGit2.add!(repo, "benchmark/benchmarks.jl")
     LibGit2.add!(repo, "benchmark/REQUIRE")
     @test LibGit2.isdirty(repo)
-    @test_throws ErrorException PkgBenchmark.benchmarkpkg(TEST_PACKAGE_NAME, "HEAD"; custom_loadpath=old_pkgdir)
-    results = PkgBenchmark.benchmarkpkg(TEST_PACKAGE_NAME; custom_loadpath=old_pkgdir, resultsdir=tmp)
-    test_structure(results)
-    @test !isfile(resfile)
+    @test_throws ErrorException PkgBenchmark.benchmark(TEST_PACKAGE_NAME, "HEAD"; custom_loadpath=old_pkgdir)
+    results = PkgBenchmark.benchmark(TEST_PACKAGE_NAME; custom_loadpath=old_pkgdir, resultsdir=tmp)
+    test_structure(PkgBenchmark.benchmarkgroup(results))
+    @test_throws ErrorException readresults("Example")
 
     # Commit and benchmark non dirty repo
     commitid = LibGit2.commit(repo, "commiting full benchmarks and REQUIRE"; author=test_sig, committer=test_sig)
     resfile = joinpath(tmp, "$(string(commitid)).jld")
     @test !LibGit2.isdirty(repo)
-    results = PkgBenchmark.benchmarkpkg(TEST_PACKAGE_NAME, "HEAD"; custom_loadpath=old_pkgdir, resultsdir=tmp)
-    test_structure(results)
-    @test isfile(resfile)
-    @test PkgBenchmark.readresults(resfile) == results
+    results = PkgBenchmark.benchmark(TEST_PACKAGE_NAME, "HEAD"; custom_loadpath=old_pkgdir, resultsdir=tmp)
+    test_structure(PkgBenchmark.benchmarkgroup(results))
+    test_structure(readresults("Example"))
 
     # Make a dummy commit and test comparing HEAD and HEAD~
     touch(joinpath(testpkg_path, "dummy"))
     LibGit2.add!(repo, "dummy")
     LibGit2.commit(repo, "dummy commit"; author=test_sig, committer=test_sig)
 
+    #=
     @testset "withresults" begin
         PkgBenchmark.withresults(TEST_PACKAGE_NAME, ["HEAD~", "HEAD"], custom_loadpath=old_pkgdir) do res
             @test length(res) == 2
@@ -125,5 +125,5 @@ temp_pkg_dir(;tmp_dir = tmp_dir) do
             test_structure(judge(minimum(a), minimum(b)))
         end
     end
+    =#
 end
-=#

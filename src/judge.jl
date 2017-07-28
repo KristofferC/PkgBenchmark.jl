@@ -1,42 +1,42 @@
 """
-    judge(pkg::String, target::BenchmarkConfig, baseline::BenchmarkConfig; judge_kwargs::Dict, kwargs...)
+    judge(pkg::String, target::BenchmarkConfig, baseline::BenchmarkConfig;
+          judge_kwargs::Dict=Dict(), kwargs...)
 
-Judges the results of the benchmarktarget `target` against `baseline`.
-
+Judges the results of benchmarking `target` against `baseline` for package `pkg`.
 
 **Arguments**:
 
 - `pkg` is the package to benchmark
-- `ref` optional, the commit to judge. If skipped, use the current state of the package repo.
+- `target` the commit to judge. If skipped, use the current state of the package repo.
 - `baseline` is the commit to compare `ref` against.
 
-Keyword arguments are passed to [`benchmarkpkg`](@ref)
+Keyword arguments are passed to [`benchmark`](@ref)
 """
-function BenchmarkTools.judge(pkg::String, ref1 = BenchmarkConfig(), ref2 = BenchmarkConfig(); 
-                              f=nothing, used_saved=true, resultsdir = defaultresultsdir(pkg), judge_kwargs = Dict(), kwargs...)
-    ref1, ref2 = BenchmarkConfig(ref1), BenchmarkConfig(ref2)
-    if f != nothing
-        Base.warn_once("key word `f` is deprecated and will be removed")
-    else
-        f = minimum
-    end
+function BenchmarkTools.judge(pkg::String, target = BenchmarkConfig(), baseline = BenchmarkConfig();
+                              f=minimum, used_saved=true, resultsdir = defaultresultsdir(pkg), judge_kwargs = Dict(), kwargs...)
+    target, baseline = BenchmarkConfig(target), BenchmarkConfig(baseline)
 
     function cached(ref; kws...)
         if ref.id !== nothing
-            sha = shastring(Pkg.dir(pkg), ref.id)
-            file = joinpath(resultsdir, string(_hash(ref, sha), ".jld"))
-            if isfile(file)
-                info("Loading stored results for $(sha[1:6]) from $resultsdir")
-                return readresults(file)
+            __filename = _filename(pkg, ref)
+            if isfile(__filename)
+                benchinfo("Loading stored results from $resultsdir.")
+                return load(File(format"JLD", __filename))["results"]
             end
         end
-        return benchmarkpkg(pkg, ref; kws...)
+        return benchmark(pkg, ref; kws...)
     end
 
-    result_ref1 = cached(ref1; kwargs...)
-    result_ref2 = cached(ref2; kwargs...)
+    result_ref1 = cached(target; kwargs...)
+    result_ref2 = cached(baseline; kwargs...)
 
-    BenchmarkTools.judge(f(result_ref1, result_ref2); judge_kwargs...)
+    return judge(result_ref1, result_ref2; f = f, judge_kwargs = judge_kwargs)
+end
 
-    return result_ref1, result_ref2
+function BenchmarkTools.judge(target::BenchmarkResult, baseline::BenchmarkResult;
+                              f = minimum, judge_kwargs = Dict())
+        
+        BenchmarkTools.judge(f(benchmarkgroup(target)), 
+                             f(benchmarkgroup(baseline)); judge_kwargs...)
+
 end

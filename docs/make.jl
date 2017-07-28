@@ -9,6 +9,7 @@ makedocs(
         "Manual" => [
             "man/define_benchmarks.md",
             "man/run_benchmarks.md",
+        "Reference" => "ref.md"
         ]
     ]
 )

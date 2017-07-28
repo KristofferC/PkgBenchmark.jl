@@ -24,7 +24,6 @@ function with_reqs(f, reqs::Dict, pre=() -> nothing)
     end
 end
 
-
 # Run a function on a certain commit on the repo.
 # Afterwards, go back to the previous commit or branch.
 function with_commit(f, repo, commit)
@@ -43,3 +42,6 @@ function with_commit(f, repo, commit)
         end
     end
 end
+
+benchinfo(str) = print_with_color(Base.info_color(), STDOUT, "PkgBenchmark: ", str, "\n")
+benchwarn(str) = print_with_color(Base.info_color(), STDOUT, "PkgBenchmark: ", str, "\n")
